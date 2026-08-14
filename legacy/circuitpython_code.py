@@ -22,16 +22,17 @@ from adafruit_ntp import NTP
 # ——— Configuration ———
 SSID               = getenv("CIRCUITPY_WIFI_SSID")
 PASSWORD           = getenv("CIRCUITPY_WIFI_PASSWORD")
+IKITESURF_API_KEY  = getenv("IKITESURF_API_KEY")
+IKITESURF_TOKEN    = getenv("IKITESURF_TOKEN")
+IKITESURF_USER_AGENT = getenv(
+    "IKITESURF_USER_AGENT",
+    "iKitesurf/1777 CFNetwork/3826.500.131 Darwin/24.5.0",
+)
 
 API_BASE_URL       = "https://api.weatherflow.com/wxengine/rest/spot/getSpotSetByList"
 API_PARAMS         = {
-    "wa_ver": "1777",
-    "device_id": "00d8a1231a5807fd67e7d78d846664e1",
-    "device_type": "iPhone",
-    "device_os": "18.5",
-    "wf_apikey": "6e564a0e-245a-4ab0-a351-359466f83aa4",
-    "v": "1.3",
-    "wf_token": "303a818ae828018c637e027c7900cfa0",
+    "wf_apikey": IKITESURF_API_KEY,
+    "wf_token": IKITESURF_TOKEN,
     "activity": "Kite",
     "spot_list": "332,334,330,336",
     "fav_spot_list": "",
@@ -46,7 +47,7 @@ API_PARAMS         = {
     "format": "json"
 }
 API_HEADERS        = {
-    "User-Agent": "iKitesurf/1777 CFNetwork/3826.500.131 Darwin/24.5.0",
+    "User-Agent": IKITESURF_USER_AGENT,
     "Accept": "*/*",
     "Accept-Encoding": "identity"
 }

@@ -1,0 +1,52 @@
+{
+  "status": {"status_code": 0, "status_message": "Success"},
+  "spot_id": 332,
+  "model_name": "Blended Numerical Weather Prediction Model",
+  "model_short_name": "Blend",
+  "units_wind": "kts",
+  "model_data": [
+    {
+      "model_time_local": "2026-08-14 11:00:00-0400",
+      "wind_speed": 14.0,
+      "wind_gust": 18.0,
+      "wind_dir": 225,
+      "wind_dir_txt": "SW"
+    },
+    {
+      "model_time_local": "2026-08-14 12:00:00-0400",
+      "wind_speed": 15.0,
+      "wind_gust": 19.0,
+      "wind_dir": 225,
+      "wind_dir_txt": "SW"
+    },
+    {
+      "model_time_local": "2026-08-14 13:00:00-0400",
+      "wind_speed": 16.0,
+      "wind_gust": 20.0,
+      "wind_dir": 247,
+      "wind_dir_txt": "WSW"
+    },
+    {
+      "model_time_local": "2026-08-14 14:00:00-0400",
+      "wind_speed": 17.0,
+      "wind_gust": 21.0,
+      "wind_dir": 270,
+      "wind_dir_txt": "W"
+    },
+    {
+      "model_time_local": "2026-08-14 17:00:00-0400",
+      "wind_speed": 18.0,
+      "wind_gust": 22.0,
+      "wind_dir": 270,
+      "wind_dir_txt": "W"
+    },
+    {
+      "model_time_local": "2026-08-15 00:00:00-0400",
+      "wind_speed": 10.0,
+      "wind_gust": 13.0,
+      "wind_dir": 315,
+      "wind_dir_txt": "NW"
+    }
+  ]
+}
+

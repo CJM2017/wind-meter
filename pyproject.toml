@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cape-ride"
+version = "0.1.0"
+description = "Private iKitesurf wind, Cape Cod tide, and rideability tools"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "CJM2017" }]
+dependencies = ["requests>=2.32,<3"]
+
+[project.scripts]
+ikitesurf-wind = "cape_ride.wind_cli:main"
+cape-tides = "cape_ride.tide_cli:main"
+cape-ride-check = "cape_ride.ride_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"cape_ride" = ["py.typed"]
+"cape_ride.resources" = ["*.toml"]

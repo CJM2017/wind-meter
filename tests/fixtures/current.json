@@ -1,0 +1,21 @@
+{
+  "status": {"status_code": 0, "status_message": "Success"},
+  "data_names": [
+    "spot_id",
+    "name",
+    "timestamp",
+    "avg",
+    "lull",
+    "gust",
+    "dir",
+    "dir_text",
+    "status_message",
+    "last_wind_ob_utc"
+  ],
+  "data_values": [
+    [334, "West Dennis", "2026-08-14 11:58:00-0400", 15.0, 13.0, 18.0, 225, "SW", null, 1786723080],
+    [332, "Kalmus", "2026-08-14 11:00:00-0400", 16.0, 14.0, 20.0, 247, "WSW", null, 1786719600],
+    [330, "Chatham", "2026-08-14 11:59:00-0400", null, null, null, 180, "S", null, 1786723140]
+  ]
+}
+
