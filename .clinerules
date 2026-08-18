@@ -1,0 +1,12 @@
+# Local Ollama Execution Rules (Qwen 3.5 Optimization)
+
+## Output & Parsing Constraints
+- NEVER generate `<thinking>`, `<reasoning>`, or chain-of-thought XML tags.
+- Output pure, raw response text and standard API schema calls directly.
+- Ensure all tool executions use valid, strict JSON formatting.
+- Do not output unformatted markdown code blocks inside tool arguments.
+
+## Response & Context Control
+- Keep responses concise and focused on immediate tool execution.
+- Avoid verbose conversational intros or unnecessary setup explanations before making a tool call.
+- Do not repeat prior task history in the assistant output.
