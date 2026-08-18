@@ -7,7 +7,7 @@ name = "cape-ride"
 version = "0.1.0"
 description = "Private iKitesurf wind, Cape Cod tide, and rideability tools"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "CJM2017" }]
 dependencies = ["requests>=2.32,<3"]

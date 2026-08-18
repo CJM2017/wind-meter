@@ -103,14 +103,24 @@ class WindClient:
 
     def _current_params(self, spots: tuple[SpotConfig, ...]) -> dict[str, str]:
         return {
+            "wa_ver": "1777",
+            "device_id": "00d8a1231a5807fd67e7d78d846664e1",
+            "device_type": "iPhone",
+            "device_os": "18.5",
             "wf_apikey": self._credentials.api_key,
             "wf_token": self._credentials.token,
             "activity": "Kite",
             "spot_list": ",".join(str(spot.provider_spot_id) for spot in spots),
+            "fav_spot_list": "",
             "spot_types": "1,100,101",
+            "include_spot_products": "false",
+            "page": "1",
             "units_distance": "mi",
             "units_wind": "kts",
             "units_temp": "f",
+            "sort": "distance",
+            "num_per_page": "100",
+            "v": "1.3",
             "format": "json",
         }
 
@@ -128,8 +138,8 @@ class WindClient:
 
     def _headers(self) -> dict[str, str]:
         return {
-            "User-Agent": self._credentials.user_agent,
-            "Accept": "application/json",
+            "User-Agent": self._credentials.user_agent or "iKitesurf/1777 CFNetwork/3826.500.131 Darwin/24.5.0",
+            "Accept": "*/*",
             "Accept-Encoding": "identity",
         }
 
@@ -297,7 +307,7 @@ def _tabular_rows(payload: JsonObject) -> tuple[JsonObject, ...]:
     for raw_row in raw_values:
         if not isinstance(raw_row, list) or len(raw_row) != len(names):
             raise SchemaError("Current response row does not match data_names")
-        rows.append(dict(zip(names, raw_row, strict=True)))
+        rows.append(dict(zip(names, raw_row)))
     return tuple(rows)
 
 

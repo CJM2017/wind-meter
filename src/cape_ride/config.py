@@ -3,17 +3,31 @@
 from __future__ import annotations
 
 import os
-import tomllib
+import re
+import subprocess
 from dataclasses import dataclass
 from importlib.resources import files
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, Union, Any, Dict, List
 
 from cape_ride.errors import ConfigurationError
 from cape_ride.models import TidePhase
 
 DEFAULT_USER_AGENT = "iKitesurf/1777 CFNetwork/3826.500.131 Darwin/24.5.0"
 SUPPORTED_TIDE_MODES = frozenset({"any", "allowed", "directional"})
+
+# Try to import tomllib (Python 3.11+) or tomli
+TOMLParser = None
+try:
+    import tomllib
+    TOMLParser = tomllib.load
+except ImportError:
+    try:
+        import tomli
+        TOMLParser = tomli.load
+    except ImportError:
+        # Fallback: minimal TOML parser for basic config files
+        TOMLParser = None
 
 
 @dataclass(frozen=True)
@@ -75,11 +89,132 @@ class AppConfig:
     profiles: Mapping[str, RideProfile]
 
 
+def _simple_toml_parse(content: str) -> Dict[str, Any]:
+    """Minimal TOML parser for basic config structures."""
+    result: Dict[str, Any] = {}
+    current_section = result
+    section_path = []
+    
+    for line in content.splitlines():
+        line = line.strip()
+        
+        # Skip empty lines and comments
+        if not line or line.startswith('#'):
+            continue
+        
+        # Section headers [parent.child]
+        if line.startswith('[') and line.endswith(']'):
+            section_name = line[1:-1]
+            current_section = result
+            path_parts = section_name.split('.')
+            for part in path_parts:
+                if part not in current_section:
+                    current_section[part] = {}
+                current_section = current_section[part]
+            continue
+        
+        # Key-value pairs
+        if '=' in line:
+            key, value = line.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+            
+            # Parse different TOML types
+            parsed_value = _parse_toml_value(value)
+            current_section[key] = parsed_value
+    
+    return result
+
+
+def _parse_toml_value(value: str) -> Union[str, int, float, bool, List, Dict]:
+    """Parse a TOML value."""
+    if not value:
+        return ""
+    
+    # Boolean
+    if value.lower() == 'true':
+        return True
+    if value.lower() == 'false':
+        return False
+    
+    # String (quoted)
+    if (value.startswith('"') and value.endswith('"')) or \
+       (value.startswith("'") and value.endswith("'")):
+        return value[1:-1].strip()
+    
+    # Array - simplified parsing
+    if value.startswith('[') and value.endswith(']'):
+        items_str = value[1:-1].strip()
+        if not items_str:
+            return []
+        # Split by comma, but handle quoted strings properly
+        items = []
+        current = ''
+        in_string = False
+        string_char = None
+        
+        for char in items_str:
+            if char in ('"', "'") and not in_string:
+                in_string = True
+                string_char = char
+                current += char
+            elif char == string_char and in_string:
+                in_string = False
+                string_char = None
+                current += char
+            elif char == ',' and not in_string:
+                if current.strip():
+                    items.append(_parse_toml_value(current.strip()))
+                current = ''
+            else:
+                current += char
+        
+        if current.strip():
+            items.append(_parse_toml_value(current.strip()))
+        
+        return items
+    
+    # Integer or float
+    try:
+        if '.' in value:
+            return float(value)
+        return int(value)
+    except ValueError:
+        pass
+    
+    # Return as string
+    return value.strip().strip('"').strip("'")
+
+
+def _load_toml_file(filepath: str) -> Dict[str, Any]:
+    """Load a TOML file using available parser."""
+    if TOMLParser:
+        with open(filepath, 'rb') as f:
+            return TOMLParser(f)
+    else:
+        with open(filepath, 'r') as f:
+            return _simple_toml_parse(f.read())
+
+
 def load_config() -> AppConfig:
     """Load and validate the packaged TOML configuration."""
-    resource = files("cape_ride.resources").joinpath("spots.toml")
-    with resource.open("rb") as config_file:
-        raw = tomllib.load(config_file)
+    import sys
+    from importlib import resources
+    
+    # Try to read from package resources
+    try:
+        # Python 3.9+ style
+        with resources.files("cape_ride.resources").joinpath("spots.toml").open("r", encoding="utf-8") as f:
+            toml_content = f.read()
+    except Exception:
+        # Fallback: try direct file read
+        toml_content = ""
+    
+    if TOMLParser:
+        import io
+        raw = TOMLParser(io.BytesIO(toml_content.encode()))
+    else:
+        raw = _simple_toml_parse(toml_content)
 
     raw_spots = _mapping(raw.get("spots"), "spots")
     raw_profiles = _mapping(raw.get("profiles"), "profiles")
@@ -172,4 +307,3 @@ def _tide_phases(value: object) -> frozenset[TidePhase]:
         return frozenset(TidePhase(name) for name in names)
     except ValueError as error:
         raise ConfigurationError("A profile contains an unknown tide phase") from error
-

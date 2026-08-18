@@ -52,7 +52,7 @@ class TideClient:
                     boundaries.add(boundary)
         ordered = sorted(boundaries)
         periods: list[TidePeriod] = []
-        for start, end in zip(ordered, ordered[1:], strict=False):
+        for start, end in zip(ordered, ordered[1:]):
             midpoint = start + (end - start) / 2
             phase = classify_tide(spot, midpoint, extrema).phase
             period = TidePeriod(

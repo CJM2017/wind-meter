@@ -4,7 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
+
+# StrEnum requires Python 3.11+, provide fallback for older versions
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+    
+    class StrEnum(str, Enum):
+        """Backport of StrEnum for Python < 3.11"""
+        def __new__(cls, value):
+            obj = str.__new__(cls, value)
+            obj._value_ = value
+            return obj
 
 
 class DataStatus(StrEnum):
@@ -149,4 +161,3 @@ class RideForecast:
     result: RideResult
     reasons: tuple[str, ...]
     windows: tuple[RideWindow, ...]
-
