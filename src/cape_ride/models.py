@@ -149,6 +149,7 @@ class RideWindow:
     directions: tuple[str, ...]
     tide_phases: tuple[TidePhase, ...]
     preferred: bool | None
+    daylight_limited: bool | None = None
 
 
 @dataclass(frozen=True)

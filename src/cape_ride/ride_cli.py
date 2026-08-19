@@ -17,6 +17,7 @@ from cape_ride.config import WindCredentials, load_config
 from cape_ride.evaluator import RideService
 from cape_ride.http_client import RequestsJsonHttpClient
 from cape_ride.serialization import dumps, to_jsonable
+from cape_ride.sunrise_sunset import SunriseSunsetClient
 from cape_ride.tides import TideClient
 from cape_ride.wind import WindClient
 
@@ -53,6 +54,7 @@ def _execute(args: argparse.Namespace) -> str:
         config=config,
         wind_client=WindClient(http_client, WindCredentials.from_environment()),
         tide_client=TideClient(http_client),
+        sunrise_client=SunriseSunsetClient(http_client),
     )
     if args.command == "current":
         assessments = service.get_current(profiles, now)
