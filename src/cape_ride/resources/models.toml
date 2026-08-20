@@ -1,0 +1,17 @@
+# Auto-generated models configuration
+# Generated on: 2026-08-20T00:51:15.700029-04:00
+
+[models.model_-1]
+id = -1
+name = "Blended Numerical Weather Prediction Model"
+priority = 1
+
+[models.model_2]
+id = 2
+name = "GFS Global Forecast System Model 0.5 Deg"
+priority = 2
+
+[models.model_1]
+id = 1
+name = "NAM 12km North American Mesoscale Model"
+priority = 3

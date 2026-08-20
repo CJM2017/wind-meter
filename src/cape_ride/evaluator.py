@@ -115,51 +115,116 @@ class RideService:
         profiles: Iterable[RideProfile],
         days: int = 3,
         now: datetime | None = None,
+        use_multi_model: bool = False,
+        model_ids: list[int] | None = None,
     ) -> tuple[tuple[RideForecast, ...], ForecastRange]:
-        """Evaluate rideable windows for the requested local-day range."""
+        """Evaluate rideable windows for the requested local-day range.
+        
+        Args:
+            profiles: Ride profiles to evaluate
+            days: Number of days to forecast
+            now: Reference time
+            use_multi_model: If True, fetch from multiple models and use "any model passes" logic
+            model_ids: List of model IDs to query when use_multi_model is True
+            
+        Returns:
+            Tuple of (RideForecast results, ForecastRange)
+        """
         selected = tuple(profiles)
         local_now = now or datetime.now(tz=LOCAL_TIMEZONE)
         forecast_range = make_forecast_range(local_now, days)
-        forecasts: dict[str, WindForecast] = {}
-        forecast_errors: set[str] = set()
-        for spot in self._spots_for_profiles(selected):
-            try:
-                forecast, _ = self._wind_client.get_forecast(spot, days, local_now)
-                forecasts[spot.key] = forecast
-            except CapeRideError:
-                forecast_errors.add(spot.key)
-
-        tide_periods: dict[str, tuple[TidePeriod, ...] | None] = {}
-        for profile in selected:
-            if not _uses_tide(profile) or profile.spot in tide_periods:
-                continue
-            try:
-                tide_periods[profile.spot] = self._tide_client.get_forecast_periods(
-                    self._config.spots[profile.spot],
-                    forecast_range,
+        
+        if use_multi_model:
+            # Multi-model mode: fetch from multiple models and merge results
+            forecasts_by_spot: dict[str, list[tuple[WindForecast, set[int]]]] = {}
+            forecast_errors: set[str] = set()
+            
+            for spot in self._spots_for_profiles(selected):
+                try:
+                    multi_forecasts = self._wind_client.get_forecast_from_multiple_models(
+                        spot, days, model_ids, local_now
+                    )
+                    if multi_forecasts:
+                        # Each entry: (forecast, set of model_ids that succeeded)
+                        forecasts_by_spot[spot.key] = [
+                            (forecast, {model_id})
+                            for model_id, (forecast, _) in multi_forecasts.items()
+                        ]
+                except CapeRideError as e:
+                    forecast_errors.add(spot.key)
+                    forecasts_by_spot[spot.key] = []
+            
+            # Evaluate each profile with multi-model results
+            tide_periods: dict[str, tuple[TidePeriod, ...] | None] = {}
+            for profile in selected:
+                if not _uses_tide(profile) or profile.spot in tide_periods:
+                    continue
+                try:
+                    tide_periods[profile.spot] = self._tide_client.get_forecast_periods(
+                        self._config.spots[profile.spot],
+                        forecast_range,
+                    )
+                except CapeRideError:
+                    tide_periods[profile.spot] = None
+            
+            sun_cache: dict[str, SunTimes | Exception] = {}
+            for spot in self._config.spots.values():
+                for day_offset in range(days):
+                    test_date = local_now + timedelta(days=day_offset)
+                    _get_cached_sun_times(self._sunrise_client, sun_cache, spot, test_date)
+            
+            results = tuple(
+                evaluate_forecast_multi_model(
+                    profile=profile,
+                    spot=self._config.spots[profile.spot],
+                    multi_forecasts=forecasts_by_spot.get(profile.spot, []),
+                    tide_periods=tide_periods.get(profile.spot),
+                    sun_cache=sun_cache,
                 )
-            except CapeRideError:
-                tide_periods[profile.spot] = None
-
-        # Pre-fetch sunrise/sunset for all forecast dates
-        sun_cache: dict[str, SunTimes | Exception] = {}
-        for spot in self._config.spots.values():
-            for day_offset in range(days):
-                test_date = local_now + timedelta(days=day_offset)
-                _get_cached_sun_times(self._sunrise_client, sun_cache, spot, test_date)
-
-        results = tuple(
-            evaluate_forecast(
-                profile=profile,
-                spot=self._config.spots[profile.spot],
-                forecast=forecasts.get(profile.spot),
-                tide_periods=tide_periods.get(profile.spot),
-                wind_failed=profile.spot in forecast_errors,
-                sun_cache=sun_cache,
+                for profile in selected
             )
-            for profile in selected
-        )
-        return results, forecast_range
+            return results, forecast_range
+        else:
+            # Single model mode (backward compatible)
+            forecasts: dict[str, WindForecast] = {}
+            forecast_errors: set[str] = set()
+            for spot in self._spots_for_profiles(selected):
+                try:
+                    forecast, _ = self._wind_client.get_forecast(spot, days, local_now)
+                    forecasts[spot.key] = forecast
+                except CapeRideError:
+                    forecast_errors.add(spot.key)
+            
+            tide_periods: dict[str, tuple[TidePeriod, ...] | None] = {}
+            for profile in selected:
+                if not _uses_tide(profile) or profile.spot in tide_periods:
+                    continue
+                try:
+                    tide_periods[profile.spot] = self._tide_client.get_forecast_periods(
+                        self._config.spots[profile.spot],
+                        forecast_range,
+                    )
+                except CapeRideError:
+                    tide_periods[profile.spot] = None
+            
+            sun_cache: dict[str, SunTimes | Exception] = {}
+            for spot in self._config.spots.values():
+                for day_offset in range(days):
+                    test_date = local_now + timedelta(days=day_offset)
+                    _get_cached_sun_times(self._sunrise_client, sun_cache, spot, test_date)
+            
+            results = tuple(
+                evaluate_forecast(
+                    profile=profile,
+                    spot=self._config.spots[profile.spot],
+                    forecast=forecasts.get(profile.spot),
+                    tide_periods=tide_periods.get(profile.spot),
+                    wind_failed=profile.spot in forecast_errors,
+                    sun_cache=sun_cache,
+                )
+                for profile in selected
+            )
+            return results, forecast_range
 
     def _spots_for_profiles(
         self,
@@ -257,6 +322,125 @@ def evaluate_forecast(
         result=result,
         reasons=reasons,
         windows=windows,
+    )
+
+
+def evaluate_forecast_multi_model(
+    profile: RideProfile,
+    spot: SpotConfig,
+    multi_forecasts: list[tuple[WindForecast, set[int]]],
+    tide_periods: tuple[TidePeriod, ...] | None,
+    sun_cache: dict[str, SunTimes | Exception] | None = None,
+) -> RideForecast:
+    """Evaluate rideability considering multiple models using "any model passes" logic.
+    
+    If ANY model indicates a window is rideable, that window is included in results.
+    Tracks which models agree for confidence scoring.
+    
+    Args:
+        profile: Ride profile to evaluate
+        spot: Spot configuration
+        multi_forecasts: List of (forecast, set_of_successful_model_ids) tuples
+        tide_periods: Tide periods for this spot
+        sun_cache: Cached sunrise/sunset data
+        
+    Returns:
+        RideForecast with windows from any model that showed rideable conditions
+    """
+    if not multi_forecasts:
+        return RideForecast(
+            profile=profile.key,
+            spot=profile.spot,
+            discipline=profile.discipline,
+            result=RideResult.UNKNOWN,
+            reasons=("No models available for this spot",),
+            windows=(),
+        )
+    
+    if _requires_tide(profile) and tide_periods is None:
+        return RideForecast(
+            profile=profile.key,
+            spot=profile.spot,
+            discipline=profile.discipline,
+            result=RideResult.UNKNOWN,
+            reasons=("Required tide forecast is unavailable",),
+            windows=(),
+        )
+    
+    # Collect rideable windows from all models
+    rideable_windows_by_time: dict[tuple[datetime, datetime], list[int]] = {}
+    
+    for forecast, successful_model_ids in multi_forecasts:
+        for point in forecast.points:
+            interval = _qualify_forecast_point(
+                profile, spot, point, tide_periods, sun_cache
+            )
+            if interval is None:
+                continue
+            
+            window_key = (interval.start, interval.end)
+            if window_key not in rideable_windows_by_time:
+                rideable_windows_by_time[window_key] = []
+            rideable_windows_by_time[window_key].extend(successful_model_ids)
+    
+    # Merge intervals and track model agreement
+    windows: list[RideWindow] = []
+    model_agreement_map: dict[RideWindow, list[int]] = {}
+    
+    for (start, end), model_ids in rideable_windows_by_time.items():
+        # Get the first forecast that had this window to extract details
+        first_forecast = None
+        for forecast, _ in multi_forecasts:
+            for point in forecast.points:
+                if point.valid_at == start and point.valid_until == end:
+                    first_forecast = point
+                    break
+            if first_forecast:
+                break
+        
+        if first_forecast is None:
+            continue
+        
+        # Determine model agreement confidence
+        num_models = len(set(model_ids))
+        all_models_agree = num_models > 1
+        
+        # Create RideWindow with model agreement metadata
+        window = RideWindow(
+            profile=profile.key,
+            spot=spot.key,
+            discipline=profile.discipline,
+            start=start,
+            end=end,
+            minimum_average_knots=first_forecast.average_knots,
+            maximum_average_knots=first_forecast.average_knots,
+            directions=(first_forecast.direction_cardinal,),
+            tide_phases=(),
+            preferred=None,
+            daylight_limited=None,
+            model_ids=tuple(sorted(set(model_ids))),
+            all_models_agree=all_models_agree,
+        )
+        windows.append(window)
+    
+    if windows:
+        result = RideResult.RIDEABLE
+        num_models_used = max(len(m) for _, m in rideable_windows_by_time.values()) if rideable_windows_by_time else 1
+        reasons = (
+            f"Found {len(windows)} rideable forecast window(s) ",
+            f"from {num_models_used} model(s)",
+        )
+    else:
+        result = RideResult.NOT_RIDEABLE
+        reasons = ("No forecast interval meets the profile for at least one hour",)
+    
+    return RideForecast(
+        profile=profile.key,
+        spot=spot.key,
+        discipline=profile.discipline,
+        result=result,
+        reasons=reasons,
+        windows=tuple(windows),
     )
 
 

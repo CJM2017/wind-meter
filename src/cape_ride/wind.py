@@ -1,4 +1,4 @@
-"""Authenticated iKitesurf observation and Blend forecast client."""
+"""Authenticated iKitesurf observation and forecast client supporting multiple models."""
 
 from __future__ import annotations
 
@@ -12,11 +12,21 @@ from cape_ride.errors import ProviderError, SchemaError
 from cape_ride.http_client import JsonHttpClient, JsonObject, JsonValue
 from cape_ride.models import DataStatus, WindForecast, WindForecastPoint, WindObservation
 
+# API endpoints
 CURRENT_ENDPOINT = "https://api.weatherflow.com/wxengine/rest/spot/getSpotSetByList"
 FORECAST_ENDPOINT = "https://api.weatherflow.com/wxengine/rest/model/getModelDataBySpot"
+
+# Model configuration
 BLEND_MODEL_ID = "-1"
 LOCAL_TIMEZONE = ZoneInfo("America/New_York")
 STALE_AFTER = timedelta(minutes=15)
+
+# Model priority configuration - default values (can be loaded from models.toml)
+DEFAULT_MODEL_PRIORITY = {
+    -1: 1,  # Blend - highest priority
+    2: 2,   # GFS - global forecast
+    1: 3,   # NAM - regional mesoscale
+}
 
 
 @dataclass(frozen=True)
@@ -29,7 +39,7 @@ class ForecastRange:
 
 
 class WindClient:
-    """Fetch and normalize current and forecast iKitesurf data."""
+    """Fetch and normalize current and forecast iKitesurf data from multiple models."""
 
     def __init__(
         self,
@@ -70,20 +80,39 @@ class WindClient:
         self,
         spot: SpotConfig,
         days: int = 3,
+        model_id: int | None = None,
         now: datetime | None = None,
     ) -> tuple[WindForecast, ForecastRange]:
-        """Return un-interpolated Blend points in the requested local-day range."""
+        """Return forecast points from specified model in the requested local-day range.
+        
+        Args:
+            spot: The spot to fetch forecast for
+            days: Number of days to fetch (1-10)
+            model_id: Model ID to use. If None, uses Blend model (-1).
+            now: Reference time for date range calculation.
+            
+        Returns:
+            Tuple of (WindForecast, ForecastRange)
+            
+        Raises:
+            SchemaError: If response is missing required fields or has no valid points
+            ProviderError: If API request fails
+        """
         local_now = _local_datetime(now or datetime.now(tz=LOCAL_TIMEZONE))
         forecast_range = make_forecast_range(local_now, days)
+        
+        # Use provided model_id or default to Blend
+        effective_model_id = model_id if model_id is not None else int(BLEND_MODEL_ID)
+        
         payload = self._http_client.get_json(
             FORECAST_ENDPOINT,
-            self._forecast_params(spot),
+            self._forecast_params(spot, effective_model_id),
             self._headers(),
         )
         _require_success(payload)
         model_name = _required_string(payload.get("model_name"), "model_name")
-        if "blend" not in model_name.lower():
-            raise SchemaError("Forecast response is not the Blend model")
+        
+        # Parse forecast rows - accept any model, not just Blend
         parsed = _parse_forecast_rows(payload, spot, model_name)
         points = _with_intervals(parsed)
         selected = tuple(
@@ -100,6 +129,46 @@ class WindClient:
             ),
             forecast_range,
         )
+
+    def get_forecast_from_multiple_models(
+        self,
+        spot: SpotConfig,
+        days: int = 3,
+        model_ids: list[int] | None = None,
+        now: datetime | None = None,
+    ) -> dict[int, tuple[WindForecast, ForecastRange]]:
+        """Fetch forecasts from multiple models for the same spot.
+        
+        Args:
+            spot: The spot to fetch forecast for
+            days: Number of days to fetch (1-10)
+            model_ids: List of model IDs to query. If None, queries all known models.
+            now: Reference time for date range calculation.
+            
+        Returns:
+            Dictionary mapping model_id -> (WindForecast, ForecastRange)
+            for successfully fetched models.
+        """
+        local_now = _local_datetime(now or datetime.now(tz=LOCAL_TIMEZONE))
+        forecast_range = make_forecast_range(local_now, days)
+        
+        # Default to all known models if none specified
+        if model_ids is None:
+            model_ids = list(DEFAULT_MODEL_PRIORITY.keys())
+        
+        results: dict[int, tuple[WindForecast, ForecastRange]] = {}
+        
+        for model_id in model_ids:
+            try:
+                forecast, range_ = self.get_forecast(
+                    spot, days, model_id, local_now
+                )
+                results[model_id] = (forecast, range_)
+            except (ProviderError, SchemaError) as e:
+                # Skip models that fail, continue with others
+                pass
+        
+        return results
 
     def _current_params(self, spots: tuple[SpotConfig, ...]) -> dict[str, str]:
         return {
@@ -124,9 +193,13 @@ class WindClient:
             "format": "json",
         }
 
-    def _forecast_params(self, spot: SpotConfig) -> dict[str, str]:
+    def _forecast_params(
+        self, 
+        spot: SpotConfig, 
+        model_id: int = int(BLEND_MODEL_ID),
+    ) -> dict[str, str]:
         return {
-            "model_id": BLEND_MODEL_ID,
+            "model_id": str(model_id),
             "spot_id": str(spot.provider_spot_id),
             "units_wind": "kts",
             "units_temp": "f",
@@ -253,7 +326,7 @@ def _parse_forecast_rows(
             )
         )
     if not points:
-        raise SchemaError("Blend forecast contains no usable wind points")
+        raise SchemaError("Forecast contains no usable wind points")
     return tuple(sorted(points, key=lambda point: point.valid_at))
 
 
@@ -361,4 +434,3 @@ def _optional_int(value: JsonValue | None) -> int | None:
     if isinstance(value, float) and value.is_integer():
         return int(value)
     return None
-

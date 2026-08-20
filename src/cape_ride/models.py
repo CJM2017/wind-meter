@@ -150,6 +150,9 @@ class RideWindow:
     tide_phases: tuple[TidePhase, ...]
     preferred: bool | None
     daylight_limited: bool | None = None
+    # Optional model agreement metadata (for multi-model forecasts)
+    model_ids: tuple[int, ...] = ()
+    all_models_agree: bool = False
 
 
 @dataclass(frozen=True)

@@ -42,6 +42,8 @@ def _parser() -> argparse.ArgumentParser:
     forecast = subparsers.add_parser("forecast", help="Find rideable forecast windows")
     forecast.add_argument("--profile", choices=PROFILE_CHOICES, default="all")
     forecast.add_argument("--days", type=forecast_days, default=3)
+    forecast.add_argument("--multi-model", action="store_true", help="Use multi-model forecasting")
+    forecast.add_argument("--models", action="append", type=int, default=[], help="Model IDs to query (can specify multiple times, e.g., --models -1 --models 2 --models 1)")
     return parser
 
 
@@ -66,7 +68,18 @@ def _execute(args: argparse.Namespace) -> str:
             }
         )
 
-    forecasts, forecast_range = service.get_forecast(profiles, args.days, now)
+    # Parse model IDs if provided
+    model_ids = args.models if args.models else None
+    if model_ids is not None and len(model_ids) == 0:
+        model_ids = None
+    
+    forecasts, forecast_range = service.get_forecast(
+        profiles, 
+        args.days, 
+        now,
+        use_multi_model=args.multi_model,
+        model_ids=model_ids,
+    )
     return dumps(
         {
             "mode": "forecast",
@@ -74,6 +87,7 @@ def _execute(args: argparse.Namespace) -> str:
             "days": args.days,
             "range_start": forecast_range.start,
             "range_end": forecast_range.end,
+            "multi_model": args.multi_model,
             "forecasts": to_jsonable(forecasts),
         }
     )

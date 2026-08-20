@@ -104,7 +104,14 @@ def _simple_toml_parse(content: str) -> Dict[str, Any]:
         
         # Section headers [parent.child]
         if line.startswith('[') and line.endswith(']'):
-            section_name = line[1:-1]
+            section_name = line[1:-1].strip()
+            # Handle quoted keys like [profiles."wall:tt"] or [profiles.wall:tt]
+            # Remove leading/trailing quotes from the entire section if present
+            if section_name.startswith('"') and section_name.count('"') >= 2:
+                # Find matching closing quote
+                end_quote = section_name.rfind('"')
+                if end_quote > 0:
+                    section_name = section_name[1:end_quote].strip()
             current_section = result
             path_parts = section_name.split('.')
             for part in path_parts:
@@ -218,9 +225,17 @@ def load_config() -> AppConfig:
 
     raw_spots = _mapping(raw.get("spots"), "spots")
     raw_profiles = _mapping(raw.get("profiles"), "profiles")
+    
+    # Strip quotes from profile keys
+    cleaned_profiles = {}
+    for key, value in raw_profiles.items():
+        clean_key = key.strip('"')
+        cleaned_profiles[clean_key] = value
+    
     spots = {key: _parse_spot(key, value) for key, value in raw_spots.items()}
     profiles = {
-        key: _parse_profile(key, value, spots) for key, value in raw_profiles.items()
+        key: _parse_profile(key, value, spots)
+        for key, value in cleaned_profiles.items()
     }
     return AppConfig(
         spots=MappingProxyType(spots),
