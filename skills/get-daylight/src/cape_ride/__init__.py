@@ -5,9 +5,11 @@ from .get_daylight import (
     SunTimes,
     get_daylight,
 )
+from . import cli
 
 __all__ = [
     "SunTimes",
     "DEFAULT_BUFFER_MINUTES",
     "get_daylight",
+    "cli",
 ]

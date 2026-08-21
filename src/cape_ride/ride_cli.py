@@ -44,6 +44,8 @@ def _parser() -> argparse.ArgumentParser:
     forecast.add_argument("--days", type=forecast_days, default=3)
     forecast.add_argument("--multi-model", action="store_true", help="Use multi-model forecasting")
     forecast.add_argument("--models", action="append", type=int, default=[], help="Model IDs to query (can specify multiple times, e.g., --models -1 --models 2 --models 1)")
+    forecast.add_argument("--daylight", type=str, default=None, help="External daylight data as JSON string (optional)")
+    current.add_argument("--daylight", type=str, default=None, help="External daylight data as JSON string (optional)")
     return parser
 
 
