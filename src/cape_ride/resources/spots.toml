@@ -3,24 +3,38 @@ provider_spot_id = 332
 provider_name = "Kalmus"
 tide_station_id = "8447605"
 tide_station_name = "Hyannisport"
+latitude = 41.6825
+longitude = -70.2784
+daylight_buffer_minutes = 30
 
 [spots.pond]
 provider_spot_id = 334
 provider_name = "West Dennis"
 tide_station_id = "8447504"
 tide_station_name = "South Yarmouth, Bass River"
+latitude = 41.6974
+longitude = -70.3194
+daylight_buffer_minutes = 30
 
 [spots.slick]
 provider_spot_id = 330
 provider_name = "Chatham-Harding"
 tide_station_id = "8447505"
 tide_station_name = "Chatham, Stage Harbor"
+latitude = 41.6724
+longitude = -70.0323
+daylight_buffer_minutes = 30
 
 [spots.flats]
 provider_spot_id = 336
 provider_name = "Chapin"
 tide_station_id = "8447241"
 tide_station_name = "Sesuit Harbor, East Dennis"
+latitude = 41.6775
+longitude = -70.0238
+daylight_buffer_minutes = 30
+daylight_start_offset_hours = 2
+daylight_end_offset_hours = 2
 
 [profiles."wall:tt"]
 spot = "wall"
@@ -41,7 +55,7 @@ preferred_tide_phases = ["near_high"]
 spot = "pond"
 discipline = "tt"
 minimum_average_knots = 15.0
-directions = ["SW", "SSW", "S", "SSE", "SE", "ESE"]
+directions = ["W", "WSW", "SW", "SSW", "S"]
 tide_mode = "any"
 preferred_tide_phases = ["near_high"]
 
@@ -49,7 +63,7 @@ preferred_tide_phases = ["near_high"]
 spot = "pond"
 discipline = "foil"
 minimum_average_knots = 12.0
-directions = ["WSW", "SW", "SSW", "S", "SSE", "SE", "ESE"]
+directions = ["W", "WSW", "SW", "SSW", "S"]
 tide_mode = "any"
 preferred_tide_phases = ["near_high"]
 
@@ -57,10 +71,10 @@ preferred_tide_phases = ["near_high"]
 spot = "slick"
 discipline = "tt"
 minimum_average_knots = 15.0
-directions = ["SW", "SSW", "S", "SSE", "ESE", "E"]
+directions = ["SW", "SSW", "S", "SSE", "SE"]
 tide_mode = "directional"
 lower_tide_directions = ["SW", "SSW"]
-higher_tide_directions = ["S", "SSE", "ESE", "E"]
+higher_tide_directions = ["S", "SSE", "SE"]
 
 [profiles."flats:tt"]
 spot = "flats"
@@ -69,4 +83,3 @@ minimum_average_knots = 15.0
 directions = ["WNW", "NW", "NNW", "N", "NNE", "NE", "ENE"]
 tide_mode = "allowed"
 allowed_tide_phases = ["mid_rising", "mid_falling"]
-

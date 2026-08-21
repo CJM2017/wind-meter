@@ -21,8 +21,13 @@ from cape_ride.models import (
     WindForecastPoint,
     WindObservation,
 )
-from cape_ride.sunrise_sunset import SunriseSunsetClient, SunTimes
-from cape_ride.tides import TideClient, tide_state_from_period
+from cape_ride.sunrise_sunset import (
+    SunriseSunsetClient,
+    SunTimes,
+    check_daylight_duration,
+    get_flats_daylit_period,
+)
+from cape_ride.tides import EXTREME_BUFFER, TideClient, tide_state_from_period
 from cape_ride.wind import LOCAL_TIMEZONE, ForecastRange, WindClient, make_forecast_range
 
 MINIMUM_WINDOW = timedelta(hours=1)
@@ -48,7 +53,7 @@ def _get_cached_sun_times(
     spot: SpotConfig,
     date: datetime,
 ) -> SunTimes | None:
-    """Get cached or fetch sunrise/sunset for a date."""
+    """Get cached or fetch sunrise/sunset for a date using spot-specific coordinates."""
     key = f"{spot.key}-{date.strftime('%Y-%m-%d')}"
     if key in cached:
         val = cached[key]
@@ -56,12 +61,109 @@ def _get_cached_sun_times(
             return None
         return val
     try:
-        result = client.get_suntime_for_date(date)
+        result = client.get_suntime_for_date(spot, date)
         cached[key] = result
         return result
     except Exception as e:
         cached[key] = e
         return None
+
+
+def _get_cached_tides(
+    tide_client: TideClient,
+    cached: dict[str, tuple[TidePeriod, ...] | Exception],
+    spot: SpotConfig,
+    forecast_range: ForecastRange,
+) -> tuple[TidePeriod, ...] | None:
+    """Get cached tide periods for a forecast range."""
+    key = f"{spot.key}-{forecast_range.start.strftime('%Y-%m-%d')}-{forecast_range.end.strftime('%Y-%m-%d')}"
+    if key in cached:
+        val = cached[key]
+        if isinstance(val, Exception):
+            return None
+        return val
+    try:
+        periods = tide_client.get_forecast_periods(spot, forecast_range)
+        cached[key] = periods
+        return periods
+    except Exception as e:
+        cached[key] = e
+        return None
+
+
+def _get_tide_state_at(
+    spot: SpotConfig,
+    at: datetime,
+    tide_periods: tuple[TidePeriod, ...],
+) -> TideState | None:
+    """Get tide state at a specific time from tide periods."""
+    try:
+        return tide_state_from_period(spot, at, tide_periods)
+    except CapeRideError:
+        return None
+
+
+def _local_datetime(value: datetime) -> datetime:
+    """Convert to local timezone."""
+    if value.tzinfo is None:
+        raise ValueError("datetime must be timezone-aware")
+    return value.astimezone(LOCAL_TIMEZONE)
+
+
+def _get_tide_extremes_near(
+    spot: SpotConfig,
+    at: datetime,
+    tide_periods: tuple[TidePeriod, ...],
+) -> tuple[datetime | None, datetime | None]:
+    """Get the nearest high and low tide extrema around a reference time.
+    
+    Returns:
+        Tuple of (nearest_high_tide, nearest_low_tide) or (None, None) if unavailable
+    """
+    nearest_high: datetime | None = None
+    nearest_low: datetime | None = None
+    
+    now = _local_datetime(at)
+    
+    # Since we have tide periods with EXTREME_BUFFER boundaries, we can 
+    # identify the actual tide extrema times from the period boundaries
+    # Find near_high and near_low periods - these bracket the tide extrema
+    near_high_periods = [p for p in tide_periods if p.phase == TidePhase.NEAR_HIGH]
+    near_low_periods = [p for p in tide_periods if p.phase == TidePhase.NEAR_LOW]
+    
+    # For near_high period: the tide extreme is at the start of the period
+    # For near_low period: the tide extreme is at the end of the period
+    for period in near_high_periods:
+        dist = abs((period.start - now).total_seconds())
+        if dist < EXTREME_BUFFER.total_seconds():
+            if nearest_high is None or (period.start - nearest_high).total_seconds() < 0:
+                nearest_high = period.start
+    
+    for period in near_low_periods:
+        dist = abs((period.end - now).total_seconds())
+        if dist < EXTREME_BUFFER.total_seconds():
+            if nearest_low is None or (period.end - nearest_low).total_seconds() < 0:
+                nearest_low = period.end
+    
+    # Also check from mid_rising/mid_falling to find upcoming tide extremes
+    for period in tide_periods:
+        if period.phase == TidePhase.MID_RISING:
+            # High tide is at the end of this period
+            dist = abs((period.end - now).total_seconds())
+            if nearest_high is None or dist < abs((period.end - nearest_high).total_seconds()) if nearest_high else True:
+                # Update if this is a closer upcoming high tide
+                if period.end > now:
+                    if nearest_high is None or period.end - now < (nearest_high - now).total_seconds():
+                        nearest_high = period.end
+        elif period.phase == TidePhase.MID_FALLING:
+            # Low tide is at the end of this period
+            dist = abs((period.end - now).total_seconds())
+            if nearest_low is None or dist < abs((period.end - nearest_low).total_seconds()) if nearest_low else True:
+                if period.end > now:
+                    if nearest_low is None or period.end - now < (nearest_low - now).total_seconds():
+                        nearest_low = period.end
+    
+    return nearest_high, nearest_low
 
 
 class RideService:
@@ -214,7 +316,7 @@ class RideService:
                     _get_cached_sun_times(self._sunrise_client, sun_cache, spot, test_date)
             
             results = tuple(
-                evaluate_forecast(
+                _evaluate_forecast(
                     profile=profile,
                     spot=self._config.spots[profile.spot],
                     forecast=forecasts.get(profile.spot),
@@ -232,13 +334,6 @@ class RideService:
     ) -> tuple[SpotConfig, ...]:
         keys = tuple(dict.fromkeys(profile.spot for profile in profiles))
         return tuple(self._config.spots[key] for key in keys)
-
-
-def _get_forecast_date(forecast_range: ForecastRange, point_day: int) -> datetime:
-    """Get the effective date for a forecast point based on its offset from local_now."""
-    # The forecast starts at local Now, so we need to find the date of each point
-    # Points are distributed across the forecast days
-    return forecast_range.start
 
 
 def evaluate_current(
@@ -271,7 +366,7 @@ def evaluate_current(
     )
 
 
-def evaluate_forecast(
+def _evaluate_forecast(
     profile: RideProfile,
     spot: SpotConfig,
     forecast: WindForecast | None,
@@ -301,9 +396,15 @@ def evaluate_forecast(
         )
 
     qualified: list[_QualifiedInterval] = []
+    
+    # Get tide extremes for flats daylit period calculation
+    flats_daylit_info: tuple[datetime | None, datetime | None] | None = None
+    if spot.key == "flats" and tide_periods and forecast.points:
+        flats_daylit_info = _get_tide_extremes_near(spot, forecast.points[0].valid_at, tide_periods)
+    
     for point in forecast.points:
         interval = _qualify_forecast_point(
-            profile, spot, point, tide_periods, sun_cache
+            profile, spot, point, tide_periods, sun_cache, flats_daylit_info
         )
         if interval is not None:
             qualified.append(interval)
@@ -367,13 +468,18 @@ def evaluate_forecast_multi_model(
             windows=(),
         )
     
+    # Get tide extremes for flats daylit period calculation (use first forecast's start)
+    flats_daylit_info: tuple[datetime | None, datetime | None] | None = None
+    if spot.key == "flats" and tide_periods and multi_forecasts:
+        flats_daylit_info = _get_tide_extremes_near(spot, multi_forecasts[0][0].start, tide_periods)
+    
     # Collect rideable windows from all models
     rideable_windows_by_time: dict[tuple[datetime, datetime], list[int]] = {}
     
     for forecast, successful_model_ids in multi_forecasts:
         for point in forecast.points:
             interval = _qualify_forecast_point(
-                profile, spot, point, tide_periods, sun_cache
+                profile, spot, point, tide_periods, sun_cache, flats_daylit_info
             )
             if interval is None:
                 continue
@@ -385,8 +491,6 @@ def evaluate_forecast_multi_model(
     
     # Merge intervals and track model agreement
     windows: list[RideWindow] = []
-    model_agreement_map: dict[RideWindow, list[int]] = {}
-    
     for (start, end), model_ids in rideable_windows_by_time.items():
         # Get the first forecast that had this window to extract details
         first_forecast = None
@@ -450,6 +554,7 @@ def _qualify_forecast_point(
     point: WindForecastPoint,
     tide_periods: tuple[TidePeriod, ...] | None,
     sun_cache: dict[str, SunTimes | Exception] | None,
+    flats_daylit_info: tuple[datetime | None, datetime | None] | None = None,
 ) -> _QualifiedInterval | None:
     if point.valid_until is None or point.valid_until <= point.valid_at:
         return None
@@ -480,47 +585,73 @@ def _qualify_forecast_point(
     if tide_result is not RideResult.RIDEABLE:
         return None
 
-    # Check daylight constraints (STRICT: exclude if outside valid window)
-    daylight_start = None
-    daylight_end = None
-
+    # Check daylight constraints with duration validation
+    # Get daylight information from cache
+    sun_times = None
     if sun_cache is not None:
         sun_key = f"{spot.key}-{point.valid_at.strftime('%Y-%m-%d')}"
         sun_times = sun_cache.get(sun_key)
-        if sun_times is not None:
-            daylight_start = sun_times.daylight_start
-            daylight_end = sun_times.daylight_end
 
-    # Strict filtering: must have at least 30 minutes before end of daylight
-    if daylight_end is not None and point.valid_at >= daylight_end:
-        # Point ends after valid daylight window - exclude
-        return None
+    if sun_times is not None:
+        # Calculate actual point interval for daylight check
+        point_start = point.valid_at
+        point_end = point.valid_until if point.valid_until else point.valid_at
 
-    # Check if start of point is after daylight start
-    if daylight_start is not None and point.valid_at < daylight_start:
-        # Point starts before valid window - could be partial
-        # But since we're strict, we need the whole valid_at to daylight_end to be usable
-        # Actually, we should check if the interval overlaps with valid daylight
-        # For simplicity in strict mode: if point valid_at < daylight_start, skip it
-        # This is conservative but ensures we don't have partial dark sessions
-        return None
+        # Check if there's at least 30 minutes of daylight in the window
+        has_minimum, daylight_minutes = check_daylight_duration(
+            point_start, point_end, sun_times, spot
+        )
 
-    daylight_limited = None
-    if daylight_end is not None and point.valid_at >= daylight_start:
-        # Check if this point extends beyond daylight_end
-        point_actual_end = point.valid_until if point.valid_until else point.valid_at
-        if point_actual_end > daylight_end:
+        if not has_minimum:
+            # Not enough daylight in this window - exclude
+            return None
+
+        # For flats, check if the point falls within a valid tide-relative daylit period
+        if spot.key == "flats" and flats_daylit_info:
+            high_tide, low_tide = flats_daylit_info
+            daylit_period = get_flats_daylit_period(spot, point_start, high_tide, low_tide)
+            
+            if daylit_period is None:
+                # Point is not within a valid tide-relative daylit period - exclude
+                return None
+            
+            daylit_start, daylit_end = daylit_period
+            # Verify the point interval is within the daylit period
+            if point_start < daylit_start or point_end > daylit_end:
+                return None
+
+        # Determine if window is daylight-limited
+        daylight_limited = False
+        if daylight_minutes < 30.0:
+            # Less than 30 min buffer - limited
+            pass  # Keep as is since we already checked has_minimum
+        
+        # Check if the point extends significantly beyond daylight period
+        # This marks windows that are approaching end of day
+        if point_end > sun_times.daylight_end:
             daylight_limited = True
 
-    return _QualifiedInterval(
-        start=point.valid_at,
-        end=point.valid_until,
-        average_knots=point.average_knots,
-        direction=point.direction_cardinal,
-        tide_phase=tide.phase if tide else None,
-        preferred=preferred,
-        daylight_limited=daylight_limited,
-    )
+        return _QualifiedInterval(
+            start=point_start,
+            end=point_end,
+            average_knots=point.average_knots,
+            direction=point.direction_cardinal,
+            tide_phase=tide.phase if tide else None,
+            preferred=preferred,
+            daylight_limited=daylight_limited,
+        )
+    else:
+        # No sun times available - still validate basic constraints
+        # But mark as potentially problematic if near expected times
+        return _QualifiedInterval(
+            start=point.valid_at,
+            end=point.valid_until,
+            average_knots=point.average_knots,
+            direction=point.direction_cardinal,
+            tide_phase=tide.phase if tide else None,
+            preferred=preferred,
+            daylight_limited=False,
+        )
 
 
 def _evaluate_wind(

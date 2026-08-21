@@ -63,6 +63,11 @@ class SpotConfig:
     provider_name: str
     tide_station_id: str
     tide_station_name: str
+    latitude: float
+    longitude: float
+    daylight_buffer_minutes: float
+    daylight_start_offset_hours: float | None = None
+    daylight_end_offset_hours: float | None = None
 
 
 @dataclass(frozen=True)
@@ -250,7 +255,12 @@ def _parse_spot(key: str, value: object) -> SpotConfig:
         provider_spot_id=_integer(item.get("provider_spot_id"), "provider_spot_id"),
         provider_name=_string(item.get("provider_name"), "provider_name"),
         tide_station_id=_string(item.get("tide_station_id"), "tide_station_id"),
-        tide_station_name=_string(item.get("tide_station_name"), "tide_station_name"),
+       tide_station_name=_string(item.get("tide_station_name"), "tide_station_name"),
+        latitude=_number(item.get("latitude"), "latitude"),
+        longitude=_number(item.get("longitude"), "longitude"),
+        daylight_buffer_minutes=_number(item.get("daylight_buffer_minutes", 30), "daylight_buffer_minutes"),
+        daylight_start_offset_hours=_number(item.get("daylight_start_offset_hours"), "daylight_start_offset_hours") if item.get("daylight_start_offset_hours") is not None else None,
+        daylight_end_offset_hours=_number(item.get("daylight_end_offset_hours"), "daylight_end_offset_hours") if item.get("daylight_end_offset_hours") is not None else None,
     )
 
 
